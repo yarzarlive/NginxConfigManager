@@ -1,0 +1,442 @@
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const util = require('util');
+const { Client } = require('ssh2');
+const { exec } = require('child_process'); // Native exec for local commands
+
+// --- Polyfills ---
+if (!util.isObject) util.isObject = (arg) => typeof arg === 'object' && arg !== null;
+if (!util.isFunction) util.isFunction = (arg) => typeof arg === 'function';
+
+// Backup Directory
+const BACKUP_DIR = path.join(__dirname, 'backups');
+if (!fs.existsSync(BACKUP_DIR)) {
+    fs.mkdirSync(BACKUP_DIR);
+}
+
+// Global State
+let mainWindow;
+let currentAdapter = null;
+let pendingPasswordResolve = null;
+
+// --- ADAPTERS ---
+
+class LocalAdapter {
+    constructor(passwordPrompter) {
+        this.sitesAvailable = '/etc/nginx/sites-available';
+        this.sitesEnabled = '/etc/nginx/sites-enabled';
+        // sudoPassword state: 
+        // null = unknown/not checked
+        // false = passwordless (NOPASSWD) detected
+        // string = cached password
+        this.sudoPassword = null;
+        this.passwordPrompter = passwordPrompter;
+    }
+
+    // Helper: Execute shell command locally
+    exec(command) {
+        return new Promise((resolve, reject) => {
+            exec(command, (error, stdout, stderr) => {
+                // For some commands (like nginx -t), output is often in stderr even on success.
+                // We resolve with stdout if success, but if error code != 0, we reject.
+                if (error) {
+                    reject(stderr || error.message);
+                } else {
+                    resolve(stdout);
+                }
+            });
+        });
+    }
+
+    // --- Sudo Handling ---
+    async ensureSudo() {
+        if (this.sudoPassword !== null) return; // Already cached or determined passwordless
+
+        // 1. Optimistic Check: Try passwordless sudo
+        try {
+            await this.exec('sudo -n true');
+            // If successful, user has NOPASSWD set
+            this.sudoPassword = false;
+        } catch (err) {
+            // 2. Failed (exit code 1), so we need to ask UI for password
+            this.sudoPassword = await this.passwordPrompter();
+        }
+    }
+
+    getSudoCmd(cmd) {
+        // Case A: Passwordless
+        if (this.sudoPassword === false) {
+            return `sudo ${cmd}`;
+        }
+        
+        // Case B: Has Password
+        if (typeof this.sudoPassword === 'string') {
+            const safePass = this.sudoPassword.replace(/"/g, '\\"');
+            // -S reads password from stdin, -p '' removes the prompt text
+            return `echo "${safePass}" | sudo -S -p '' ${cmd}`;
+        }
+
+        // Fallback (shouldn't be reached if ensureSudo called)
+        return `sudo ${cmd}`;
+    }
+
+    // --- Operations ---
+
+    async listConfigs() {
+        if (!fs.existsSync(this.sitesAvailable)) return [];
+        const available = fs.readdirSync(this.sitesAvailable);
+        let enabled = [];
+        if (fs.existsSync(this.sitesEnabled)) {
+            enabled = fs.readdirSync(this.sitesEnabled);
+        }
+        return available.map(file => ({
+            name: file,
+            enabled: enabled.includes(file)
+        }));
+    }
+
+    async readConfig(fileName) {
+        return fs.readFileSync(path.join(this.sitesAvailable, fileName), 'utf-8');
+    }
+
+    async toggleSite(fileName, currentState) {
+        await this.ensureSudo();
+        const availablePath = path.join(this.sitesAvailable, fileName);
+        const enabledPath = path.join(this.sitesEnabled, fileName);
+        const rawCmd = currentState 
+            ? `rm "${enabledPath}"` 
+            : `ln -s "${availablePath}" "${enabledPath}"`;
+        return this.exec(this.getSudoCmd(rawCmd));
+    }
+
+    async saveConfig(fileName, content) {
+        await this.ensureSudo();
+        
+        // Backup
+        const sourcePath = path.join(this.sitesAvailable, fileName);
+        if (fs.existsSync(sourcePath)) {
+            try {
+                const existingContent = fs.readFileSync(sourcePath, 'utf-8');
+                const backupName = `local_${fileName}.${Date.now()}`;
+                fs.writeFileSync(path.join(BACKUP_DIR, backupName), existingContent);
+            } catch (err) { console.error("Backup failed", err); }
+        }
+
+        const filePath = path.join(this.sitesAvailable, fileName);
+        
+        // Write to temp then move with sudo (safest way to handle permissions + piping)
+        const tempPath = `/tmp/nginx_mgr_local_${Date.now()}_${fileName}`;
+        
+        try {
+            // Write temp file (no sudo needed usually for /tmp)
+            fs.writeFileSync(tempPath, content);
+            
+            // Move with sudo
+            await this.exec(this.getSudoCmd(`mv "${tempPath}" "${filePath}"`));
+            
+            // Ensure permissions
+            await this.exec(this.getSudoCmd(`chown root:root "${filePath}"`));
+            
+            return "Saved";
+        } catch (err) {
+            if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+            throw err;
+        }
+    }
+
+    async createConfig(fileName, content) {
+        if (!/^[a-zA-Z0-9_\-]+$/.test(fileName)) throw new Error("Invalid filename");
+        const filePath = path.join(this.sitesAvailable, fileName);
+        if (fs.existsSync(filePath)) throw new Error("File already exists");
+        return this.saveConfig(fileName, content);
+    }
+
+    async testConfig() {
+        await this.ensureSudo();
+        return new Promise((resolve) => {
+            const cmd = this.getSudoCmd('nginx -t');
+            exec(cmd, (error, stdout, stderr) => {
+                if (error) resolve({ success: false, output: stderr || error.message });
+                else resolve({ success: true, output: stderr || stdout || "Syntax OK" });
+            });
+        });
+    }
+
+    async reloadNginx() {
+        await this.ensureSudo();
+        return this.exec(this.getSudoCmd('systemctl reload nginx'));
+    }
+}
+
+class RemoteAdapter {
+    constructor(config, passwordPrompter) {
+        this.config = config;
+        this.conn = new Client();
+        this.sitesAvailable = '/etc/nginx/sites-available';
+        this.sitesEnabled = '/etc/nginx/sites-enabled';
+        // sudoPassword state: 
+        // null = unknown
+        // false = passwordless (NOPASSWD) detected
+        // string = cached password
+        this.sudoPassword = config.sudoPassword || null; 
+        this.passwordPrompter = passwordPrompter;
+    }
+
+    connect() {
+        return new Promise((resolve, reject) => {
+            this.conn.on('ready', () => resolve());
+            this.conn.on('error', (err) => reject(err));
+            try {
+                this.conn.connect({
+                    host: this.config.host,
+                    username: this.config.username,
+                    privateKey: this.config.privateKey,
+                });
+            } catch (err) {
+                reject(err);
+            }
+        });
+    }
+
+    exec(command) {
+        return new Promise((resolve, reject) => {
+            this.conn.exec(command, (err, stream) => {
+                if (err) return reject(err);
+                let stdout = '';
+                let stderr = '';
+                stream.on('close', (code) => {
+                    if (code === 0) resolve(stdout);
+                    else reject(stderr || `Command failed with code ${code}`);
+                }).on('data', (data) => stdout += data)
+                  .stderr.on('data', (data) => stderr += data);
+            });
+        });
+    }
+
+    async ensureSudo() {
+        if (this.sudoPassword !== null) return;
+
+        // 1. Optimistic Check: Try passwordless sudo
+        try {
+            // sudo -n fails immediately with exit code 1 if password required
+            await this.exec('sudo -n true');
+            this.sudoPassword = false;
+        } catch (err) {
+            // 2. Failed, ask UI
+            this.sudoPassword = await this.passwordPrompter();
+        }
+    }
+
+    getSudoCmd(cmd) {
+        if (this.sudoPassword === false) {
+             return `sudo ${cmd}`;
+        }
+        if (typeof this.sudoPassword === 'string') {
+            const safePass = this.sudoPassword.replace(/"/g, '\\"');
+            return `echo "${safePass}" | sudo -S -p '' ${cmd}`;
+        }
+        return `sudo ${cmd}`;
+    }
+
+    async listConfigs() {
+        try {
+            const availStr = await this.exec(`ls -1 ${this.sitesAvailable}`);
+            const enabledStr = await this.exec(`ls -1 ${this.sitesEnabled}`).catch(() => ''); 
+            const available = availStr.split('\n').filter(Boolean);
+            const enabled = enabledStr.split('\n').filter(Boolean);
+            return available.map(file => ({ name: file, enabled: enabled.includes(file) }));
+        } catch (err) {
+            console.error(err);
+            return [];
+        }
+    }
+
+    // FIX: Use path.posix.join for remote paths to avoid backslashes on Windows clients
+    async readConfig(fileName) {
+        return this.exec(`cat ${path.posix.join(this.sitesAvailable, fileName)}`);
+    }
+
+    async toggleSite(fileName, currentState) {
+        await this.ensureSudo();
+        const availablePath = path.posix.join(this.sitesAvailable, fileName);
+        const enabledPath = path.posix.join(this.sitesEnabled, fileName);
+        const rawCmd = currentState ? `rm "${enabledPath}"` : `ln -s "${availablePath}" "${enabledPath}"`;
+        return this.exec(this.getSudoCmd(rawCmd));
+    }
+
+    async saveConfig(fileName, content) {
+        await this.ensureSudo();
+        try {
+            const existingContent = await this.exec(`cat ${path.posix.join(this.sitesAvailable, fileName)}`);
+            const backupName = `${this.config.host}_${fileName}.${Date.now()}`;
+            fs.writeFileSync(path.join(BACKUP_DIR, backupName), existingContent); // Local backup, so path.join is ok
+        } catch (err) { console.log("Skipping backup", err); }
+
+        const tempPath = `/tmp/nginx_mgr_${Date.now()}_${fileName}`;
+        const finalPath = path.posix.join(this.sitesAvailable, fileName);
+        const base64Content = Buffer.from(content).toString('base64');
+        
+        try {
+            await this.exec(`bash -c 'echo "${base64Content}" | base64 --decode > "${tempPath}"'`);
+            await this.exec(this.getSudoCmd(`mv "${tempPath}" "${finalPath}"`));
+            await this.exec(this.getSudoCmd(`chown root:root "${finalPath}"`));
+            return "Saved";
+        } catch (err) {
+            this.exec(`rm "${tempPath}"`).catch(() => {});
+            throw err;
+        }
+    }
+
+    async createConfig(fileName, content) {
+        await this.ensureSudo();
+        if (!/^[a-zA-Z0-9_\-]+$/.test(fileName)) throw new Error("Invalid filename");
+        try {
+            await this.exec(`test -f ${path.posix.join(this.sitesAvailable, fileName)}`);
+            throw new Error("File already exists");
+        } catch (e) {
+            if (e.message === 'File already exists') throw e;
+        }
+        return this.saveConfig(fileName, content);
+    }
+
+    async testConfig() {
+        await this.ensureSudo();
+        return new Promise((resolve) => {
+            const cmd = this.getSudoCmd('nginx -t');
+            this.conn.exec(cmd, (err, stream) => {
+                if (err) return resolve({ success: false, output: err.message });
+                let output = '';
+                stream.on('close', (code) => {
+                    resolve({ success: code === 0, output: output });
+                }).on('data', (data) => output += data)
+                  .stderr.on('data', (data) => output += data);
+            });
+        });
+    }
+
+    async reloadNginx() {
+        await this.ensureSudo();
+        return this.exec(this.getSudoCmd('systemctl reload nginx'));
+    }
+}
+
+// --- Window Management ---
+
+function createWindow() {
+    mainWindow = new BrowserWindow({
+        width: 1200,
+        height: 800,
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true,
+        }
+    });
+
+    mainWindow.loadFile('index.html');
+}
+
+app.whenReady().then(createWindow);
+
+app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit();
+});
+
+// --- IPC Handlers ---
+
+ipcMain.handle('select-key-file', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openFile', 'showHiddenFiles'],
+        title: 'Select SSH Private Key'
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+});
+
+// Helper for UI Prompts
+const createPasswordPrompter = () => {
+    return new Promise((resolve) => {
+        pendingPasswordResolve = resolve;
+        mainWindow.webContents.send('prompt-sudo');
+    });
+};
+
+ipcMain.handle('login-local', async () => {
+    currentAdapter = new LocalAdapter(createPasswordPrompter);
+    return true;
+});
+
+ipcMain.handle('login-remote', async (event, { host, username, keyPath }) => {
+    try {
+        const privateKey = fs.readFileSync(keyPath);
+        const adapter = new RemoteAdapter(
+            { host, username, privateKey }, 
+            createPasswordPrompter
+        );
+        await adapter.connect();
+        currentAdapter = adapter;
+        return true;
+    } catch (err) {
+        throw new Error(`Connection failed: ${err.message}`);
+    }
+});
+
+ipcMain.on('sudo-response', (event, password) => {
+    if (pendingPasswordResolve) {
+        pendingPasswordResolve(password);
+        pendingPasswordResolve = null;
+    }
+});
+
+// --- Delegated Handlers ---
+
+function checkAuth() { if (!currentAdapter) throw new Error("Not logged in"); }
+
+ipcMain.handle('get-configs', async () => {
+    if (!currentAdapter) return [];
+    return currentAdapter.listConfigs();
+});
+
+ipcMain.handle('read-config', async (event, fileName) => {
+    checkAuth();
+    return currentAdapter.readConfig(fileName);
+});
+
+ipcMain.handle('toggle-site', async (event, params) => {
+    checkAuth();
+    return currentAdapter.toggleSite(params.fileName, params.currentState);
+});
+
+ipcMain.handle('save-config', async (event, params) => {
+    checkAuth();
+    return currentAdapter.saveConfig(params.fileName, params.content);
+});
+
+ipcMain.handle('create-config', async (event, params) => {
+    checkAuth();
+    return currentAdapter.createConfig(params.fileName, params.content);
+});
+
+ipcMain.handle('test-config', async () => {
+    checkAuth();
+    return currentAdapter.testConfig();
+});
+
+ipcMain.handle('reload-nginx', async () => {
+    checkAuth();
+    return currentAdapter.reloadNginx();
+});
+
+ipcMain.handle('get-snippets', async () => {
+    const SNIPPETS_DIR = path.join(__dirname, 'snippets');
+    if (!fs.existsSync(SNIPPETS_DIR)) {
+        fs.mkdirSync(SNIPPETS_DIR);
+        fs.writeFileSync(path.join(SNIPPETS_DIR, 'Logs Path'), 'access_log /var/log/nginx/access.log;\nerror_log /var/log/nginx/error.log;');
+    }
+    const files = fs.readdirSync(SNIPPETS_DIR);
+    return files.map(file => ({
+        name: file,
+        content: fs.readFileSync(path.join(SNIPPETS_DIR, file), 'utf-8')
+    }));
+});

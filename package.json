@@ -1,0 +1,17 @@
+{
+  "name": "nginx-config-manager",
+  "version": "1.0.0",
+  "description": "Nginx Config Manager GUI",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "electron": "^40.0.0",
+    "monaco-editor": "^0.45.0",
+    "ssh2": "^1.17.0",
+    "sudo-prompt": "^9.2.1"
+  }
+}

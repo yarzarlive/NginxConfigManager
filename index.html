@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nginx Config Manager</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <!-- LOGIN SCREEN -->
+    <div id="login-screen">
+        <div class="login-container">
+            <h2>Nginx Manager</h2>
+            <div class="login-option">
+                <h3>Local Mode</h3>
+                <button id="btn-login-local" class="primary-btn full-width">Work Local</button>
+            </div>
+            <div class="divider">OR</div>
+            <div class="login-option">
+                <h3>Remote Mode (SSH)</h3>
+                <div class="input-group">
+                    <label>Remote IP</label>
+                    <input type="text" id="ssh-host" placeholder="192.168.1.10">
+                </div>
+                <div class="input-group">
+                    <label>Username</label>
+                    <input type="text" id="ssh-user" placeholder="root">
+                </div>
+                <div class="input-group">
+                    <label>Key File Path</label>
+                    <div style="display:flex; gap:5px;">
+                        <input type="text" id="ssh-key-display" placeholder="Select key file" readonly>
+                        <button id="btn-browse-key" class="secondary-btn">Browse</button>
+                    </div>
+                </div>
+                <button id="btn-login-remote" class="primary-btn full-width">Login Remote</button>
+                <p id="login-error" class="error-text"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN APP -->
+    <div class="container" id="app-container" style="display: none;">
+        <!-- LEFT: Config List -->
+        <div class="sidebar left-sidebar">
+            <div class="sidebar-header">
+                <h3>Sites</h3>
+                <button id="btn-new-config" class="icon-btn" title="New Config">+</button>
+            </div>
+            <ul id="config-list"></ul>
+        </div>
+
+        <!-- CENTER: Editor & Actions -->
+        <div class="main-content">
+            <div class="toolbar">
+                <span id="current-file-label">Select a file...</span>
+                <div class="actions">
+                    <button id="btn-save" disabled>Save</button>
+                    <button id="btn-test" disabled>Test Config</button>
+                    <button id="btn-reload" style="background-color: #d35400;">Reload Nginx</button>
+                </div>
+            </div>
+            <div id="editor-container"></div>
+            <div id="status-bar">Ready</div>
+        </div>
+
+        <!-- RIGHT: Snippets -->
+        <div class="sidebar right-sidebar">
+            <h3>Snippets</h3>
+            <div id="snippet-list"></div>
+        </div>
+    </div>
+
+    <!-- Snippet Popup Modal -->
+    <div id="snippet-modal" class="modal hidden">
+        <div class="modal-content large-modal">
+            <div class="modal-header">
+                <h4 id="modal-title">Snippet</h4>
+                <button id="btn-close-modal">×</button>
+            </div>
+            <div id="snippet-editor-container"></div>
+            <div class="modal-actions">
+                <button id="btn-copy-snippet" class="primary-btn">Copy to Clipboard</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Config Modal -->
+    <div id="new-config-modal" class="modal hidden">
+        <div class="modal-content small-modal">
+            <div class="modal-header">
+                <h4>New Nginx Config</h4>
+                <button id="btn-close-new-config">×</button>
+            </div>
+            <p class="modal-hint">Enter filename (letters, numbers, _, -):</p>
+            <input type="text" id="new-config-name" class="modal-input" placeholder="example_site">
+            <div class="modal-actions">
+                <button id="btn-create-config" class="primary-btn">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test Output Modal (UPDATED: Added large-modal class) -->
+    <div id="test-output-modal" class="modal hidden">
+        <div class="modal-content large-modal">
+            <div class="modal-header">
+                <h4>Nginx Test Output</h4>
+                <button id="btn-close-test">×</button>
+            </div>
+            <pre id="test-output-text"></pre>
+            <div class="modal-actions">
+                <button id="btn-close-test-action" class="primary-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SUDO PROMPT MODAL -->
+    <div id="sudo-prompt-modal" class="modal hidden">
+        <div class="modal-content small-modal">
+            <div class="modal-header">
+                <h4>Sudo Password Required</h4>
+            </div>
+            <p class="modal-hint">Enter sudo password for remote host:</p>
+            <input type="password" id="sudo-pass-input" class="modal-input">
+            <div class="modal-actions">
+                <button id="btn-submit-sudo" class="primary-btn">Submit</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CUSTOM ALERT MODAL (NEW) -->
+    <div id="custom-alert-modal" class="modal hidden">
+        <div class="modal-content small-modal">
+            <div class="modal-header">
+                <h4 id="custom-alert-title">Alert</h4>
+                <button id="btn-close-custom-alert">×</button>
+            </div>
+            <p id="custom-alert-message" style="margin-top: 0; color: #d4d4d4;"></p>
+            <div class="modal-actions">
+                <button id="btn-close-custom-alert-action" class="primary-btn">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="./node_modules/monaco-editor/min/vs/loader.js"></script>
+    <script src="renderer.js"></script>
+</body>
+</html>
