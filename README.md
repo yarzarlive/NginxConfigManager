@@ -50,6 +50,7 @@ To run this application, the following requirements must be met:
 3.  **SSH Access (For Remote Mode):**
     * SSH Private Key file (OpenSSH format).
     * The user must have `sudo` privileges on the remote server.
+    * Run `sudo visudo` command, add new line `ubuntu ALL=(ALL) NOPASSWD:ALL`. Replace `ubuntu` with your linux server username.
 
 ## Installation
 
