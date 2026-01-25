@@ -16,7 +16,9 @@ contextBridge.exposeInMainWorld('api', {
     testConfig: () => ipcRenderer.invoke('test-config'),
     reloadNginx: () => ipcRenderer.invoke('reload-nginx'),
 
-    // SUDO PROMPT INTERFACE
     onPromptSudo: (callback) => ipcRenderer.on('prompt-sudo', callback),
-    sendSudoPassword: (password) => ipcRenderer.send('sudo-response', password)
+    sendSudoPassword: (password) => ipcRenderer.send('sudo-response', password),
+
+    // NEW: Get Keywords
+    getNginxKeywords: () => ipcRenderer.invoke('get-nginx-keywords')
 });

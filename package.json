@@ -6,8 +6,8 @@
   "scripts": {
     "start": "electron ."
   },
-  "author": "",
-  "license": "ISC",
+  "author": "Yar Zar",
+  "license": "MIT",
   "dependencies": {
     "electron": "^40.0.0",
     "monaco-editor": "^0.45.0",

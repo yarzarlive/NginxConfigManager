@@ -5,17 +5,24 @@ let currentFile = null;
 // Monaco Configuration
 require.config({ paths: { 'vs': './node_modules/monaco-editor/min/vs' }});
 
-require(['vs/editor/editor.main'], function() {
+require(['vs/editor/editor.main'], async function() {
 
-    // --- Register Custom Language (Nginx) ---
+    // --- 1. Fetch Keywords Async ---
+    let nginxKeywords = [];
+    try {
+        nginxKeywords = await window.api.getNginxKeywords();
+    } catch (e) {
+        console.error("Failed to load keywords", e);
+        // Fallback default keywords if file fails
+        nginxKeywords = ['server', 'listen', 'location']; 
+    }
+
+    // --- 2. Register Custom Language (Nginx) ---
     monaco.languages.register({ id: 'nginx-custom' });
 
     monaco.languages.setMonarchTokensProvider('nginx-custom', {
-        keywords: [
-            'server', 'listen', 'server_name', 'root', 'index', 
-            'access_log', 'assess_log', 'error_log', 'location', 
-            'ssl_certificate', 'ssl_certificate_key', 'ssl_protocols'
-        ],
+        // Use the loaded keywords
+        keywords: nginxKeywords,
 
         tokenizer: {
             root: [
@@ -38,8 +45,8 @@ require(['vs/editor/editor.main'], function() {
         inherit: true,
         rules: [
             { token: 'comment', foreground: '777777' },           
-            { token: 'keyword', foreground: '4444dd' },           
-            { token: 'delimiter.bracket', foreground: '44dd44' }  
+            { token: 'keyword', foreground: '8888ee' },           
+            { token: 'delimiter.bracket', foreground: '88ee88' }  
         ],
         colors: { 'editor.background': '#1e1e1e' }
     });
@@ -84,13 +91,11 @@ function showCustomAlert(title, message) {
     customAlertTitle.textContent = title;
     customAlertMessage.textContent = message;
     customAlertModal.classList.remove('hidden');
-    // Focus the OK button so user can press Enter to close
     btnCloseCustomAlertAction.focus();
 }
 
 function closeCustomAlert() {
     customAlertModal.classList.add('hidden');
-    // Return focus to editor to avoid "frozen" state
     if (editor) editor.focus();
 }
 
@@ -268,7 +273,7 @@ const btnCloseTestAction = document.getElementById('btn-close-test-action');
 
 function closeTestModal() { 
     testModal.classList.add('hidden'); 
-    editor.focus(); // Return focus to editor
+    editor.focus(); 
 }
 btnCloseTest.addEventListener('click', closeTestModal);
 btnCloseTestAction.addEventListener('click', closeTestModal);
@@ -288,7 +293,7 @@ document.getElementById('btn-test').addEventListener('click', async () => {
     }
 });
 
-// 3. RELOAD (UPDATED: Use Custom Alert Modal)
+// 3. RELOAD
 document.getElementById('btn-reload').addEventListener('click', async () => {
     setStatus('Reloading Nginx...');
     try {

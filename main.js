@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const util = require('util');
 const { Client } = require('ssh2');
-const { exec } = require('child_process'); // Native exec for local commands
+const { exec } = require('child_process'); 
 
 // --- Polyfills ---
 if (!util.isObject) util.isObject = (arg) => typeof arg === 'object' && arg !== null;
@@ -26,20 +26,13 @@ class LocalAdapter {
     constructor(passwordPrompter) {
         this.sitesAvailable = '/etc/nginx/sites-available';
         this.sitesEnabled = '/etc/nginx/sites-enabled';
-        // sudoPassword state: 
-        // null = unknown/not checked
-        // false = passwordless (NOPASSWD) detected
-        // string = cached password
         this.sudoPassword = null;
         this.passwordPrompter = passwordPrompter;
     }
 
-    // Helper: Execute shell command locally
     exec(command) {
         return new Promise((resolve, reject) => {
             exec(command, (error, stdout, stderr) => {
-                // For some commands (like nginx -t), output is often in stderr even on success.
-                // We resolve with stdout if success, but if error code != 0, we reject.
                 if (error) {
                     reject(stderr || error.message);
                 } else {
@@ -49,39 +42,26 @@ class LocalAdapter {
         });
     }
 
-    // --- Sudo Handling ---
     async ensureSudo() {
-        if (this.sudoPassword !== null) return; // Already cached or determined passwordless
+        if (this.sudoPassword !== null) return; 
 
-        // 1. Optimistic Check: Try passwordless sudo
         try {
             await this.exec('sudo -n true');
-            // If successful, user has NOPASSWD set
             this.sudoPassword = false;
         } catch (err) {
-            // 2. Failed (exit code 1), so we need to ask UI for password
             this.sudoPassword = await this.passwordPrompter();
         }
     }
 
     getSudoCmd(cmd) {
-        // Case A: Passwordless
-        if (this.sudoPassword === false) {
-            return `sudo ${cmd}`;
-        }
+        if (this.sudoPassword === false) return `sudo ${cmd}`;
         
-        // Case B: Has Password
         if (typeof this.sudoPassword === 'string') {
             const safePass = this.sudoPassword.replace(/"/g, '\\"');
-            // -S reads password from stdin, -p '' removes the prompt text
             return `echo "${safePass}" | sudo -S -p '' ${cmd}`;
         }
-
-        // Fallback (shouldn't be reached if ensureSudo called)
         return `sudo ${cmd}`;
     }
-
-    // --- Operations ---
 
     async listConfigs() {
         if (!fs.existsSync(this.sitesAvailable)) return [];
@@ -113,7 +93,6 @@ class LocalAdapter {
     async saveConfig(fileName, content) {
         await this.ensureSudo();
         
-        // Backup
         const sourcePath = path.join(this.sitesAvailable, fileName);
         if (fs.existsSync(sourcePath)) {
             try {
@@ -124,20 +103,12 @@ class LocalAdapter {
         }
 
         const filePath = path.join(this.sitesAvailable, fileName);
-        
-        // Write to temp then move with sudo (safest way to handle permissions + piping)
         const tempPath = `/tmp/nginx_mgr_local_${Date.now()}_${fileName}`;
         
         try {
-            // Write temp file (no sudo needed usually for /tmp)
             fs.writeFileSync(tempPath, content);
-            
-            // Move with sudo
             await this.exec(this.getSudoCmd(`mv "${tempPath}" "${filePath}"`));
-            
-            // Ensure permissions
             await this.exec(this.getSudoCmd(`chown root:root "${filePath}"`));
-            
             return "Saved";
         } catch (err) {
             if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
@@ -175,10 +146,6 @@ class RemoteAdapter {
         this.conn = new Client();
         this.sitesAvailable = '/etc/nginx/sites-available';
         this.sitesEnabled = '/etc/nginx/sites-enabled';
-        // sudoPassword state: 
-        // null = unknown
-        // false = passwordless (NOPASSWD) detected
-        // string = cached password
         this.sudoPassword = config.sudoPassword || null; 
         this.passwordPrompter = passwordPrompter;
     }
@@ -216,22 +183,16 @@ class RemoteAdapter {
 
     async ensureSudo() {
         if (this.sudoPassword !== null) return;
-
-        // 1. Optimistic Check: Try passwordless sudo
         try {
-            // sudo -n fails immediately with exit code 1 if password required
             await this.exec('sudo -n true');
             this.sudoPassword = false;
         } catch (err) {
-            // 2. Failed, ask UI
             this.sudoPassword = await this.passwordPrompter();
         }
     }
 
     getSudoCmd(cmd) {
-        if (this.sudoPassword === false) {
-             return `sudo ${cmd}`;
-        }
+        if (this.sudoPassword === false) return `sudo ${cmd}`;
         if (typeof this.sudoPassword === 'string') {
             const safePass = this.sudoPassword.replace(/"/g, '\\"');
             return `echo "${safePass}" | sudo -S -p '' ${cmd}`;
@@ -252,7 +213,6 @@ class RemoteAdapter {
         }
     }
 
-    // FIX: Use path.posix.join for remote paths to avoid backslashes on Windows clients
     async readConfig(fileName) {
         return this.exec(`cat ${path.posix.join(this.sitesAvailable, fileName)}`);
     }
@@ -270,7 +230,7 @@ class RemoteAdapter {
         try {
             const existingContent = await this.exec(`cat ${path.posix.join(this.sitesAvailable, fileName)}`);
             const backupName = `${this.config.host}_${fileName}.${Date.now()}`;
-            fs.writeFileSync(path.join(BACKUP_DIR, backupName), existingContent); // Local backup, so path.join is ok
+            fs.writeFileSync(path.join(BACKUP_DIR, backupName), existingContent); 
         } catch (err) { console.log("Skipping backup", err); }
 
         const tempPath = `/tmp/nginx_mgr_${Date.now()}_${fileName}`;
@@ -354,7 +314,6 @@ ipcMain.handle('select-key-file', async () => {
     return result.filePaths[0];
 });
 
-// Helper for UI Prompts
 const createPasswordPrompter = () => {
     return new Promise((resolve) => {
         pendingPasswordResolve = resolve;
@@ -439,4 +398,19 @@ ipcMain.handle('get-snippets', async () => {
         name: file,
         content: fs.readFileSync(path.join(SNIPPETS_DIR, file), 'utf-8')
     }));
+});
+
+// --- NEW: Get Keywords Handler ---
+ipcMain.handle('get-nginx-keywords', async () => {
+    const keywordsPath = path.join(__dirname, 'nginx-keywords.json');
+    try {
+        if (fs.existsSync(keywordsPath)) {
+            const data = fs.readFileSync(keywordsPath, 'utf-8');
+            return JSON.parse(data);
+        }
+        return [];
+    } catch (e) {
+        console.error("Failed to load keywords", e);
+        return [];
+    }
 });
