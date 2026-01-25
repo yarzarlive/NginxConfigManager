@@ -20,6 +20,8 @@ body {
     border-right: 1px solid #3e3e42;
     display: flex;
     flex-direction: column;
+    /* FIX: Prevent sidebar from shrinking when window resizes */
+    flex-shrink: 0;
 }
 
 .right-sidebar {
@@ -124,6 +126,9 @@ input:checked + .slider:before { transform: translateX(16px); }
     flex: 1;
     display: flex;
     flex-direction: column;
+    /* FIX: Allow main content to shrink below its content size 
+       so sidebars aren't pushed out */
+    min-width: 0;
 }
 
 .toolbar {
@@ -133,6 +138,8 @@ input:checked + .slider:before { transform: translateX(16px); }
     align-items: center;
     justify-content: space-between;
     padding: 0 15px;
+    /* FIX: Prevent toolbar from shrinking vertically */
+    flex-shrink: 0;
 }
 
 .actions button {
@@ -165,6 +172,8 @@ input:checked + .slider:before { transform: translateX(16px); }
     padding: 0 10px;
     display: flex;
     align-items: center;
+    /* FIX: Prevent status bar from shrinking */
+    flex-shrink: 0;
 }
 
 /* Snippets Side Buttons */

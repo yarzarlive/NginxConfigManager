@@ -46,7 +46,7 @@ require(['vs/editor/editor.main'], async function() {
         rules: [
             { token: 'comment', foreground: '777777' },           
             { token: 'keyword', foreground: '8888ee' },           
-            { token: 'delimiter.bracket', foreground: '88ee88' }  
+            { token: 'delimiter.bracket', foreground: '22cc22' }  
         ],
         colors: { 'editor.background': '#1e1e1e' }
     });
