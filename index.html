@@ -27,8 +27,14 @@
                     <label>Username</label>
                     <input type="text" id="ssh-user" placeholder="root">
                 </div>
+                
                 <div class="input-group">
-                    <label>Key File Path</label>
+                    <label>Password (Optional if Key used)</label>
+                    <input type="password" id="ssh-pass" placeholder="Password">
+                </div>
+
+                <div class="input-group">
+                    <label>Key File Path (Optional if Password used)</label>
                     <div style="display:flex; gap:5px;">
                         <input type="text" id="ssh-key-display" placeholder="Select key file" readonly>
                         <button id="btn-browse-key" class="secondary-btn">Browse</button>
@@ -93,15 +99,15 @@
                 <h4>New Nginx Config</h4>
                 <button id="btn-close-new-config">×</button>
             </div>
-            <p class="modal-hint">Enter filename (letters, numbers, _, -):</p>
-            <input type="text" id="new-config-name" class="modal-input" placeholder="example_site">
+            <p class="modal-hint">Enter filename (letters, numbers, _, -, .):</p>
+            <input type="text" id="new-config-name" class="modal-input" placeholder="example.com">
             <div class="modal-actions">
                 <button id="btn-create-config" class="primary-btn">Create</button>
             </div>
         </div>
     </div>
 
-    <!-- Test Output Modal (UPDATED: Added large-modal class) -->
+    <!-- Test Output Modal -->
     <div id="test-output-modal" class="modal hidden">
         <div class="modal-content large-modal">
             <div class="modal-header">
@@ -129,7 +135,7 @@
         </div>
     </div>
 
-    <!-- CUSTOM ALERT MODAL (NEW) -->
+    <!-- CUSTOM ALERT MODAL -->
     <div id="custom-alert-modal" class="modal hidden">
         <div class="modal-content small-modal">
             <div class="modal-header">

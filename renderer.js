@@ -132,16 +132,22 @@ document.getElementById('btn-browse-key').addEventListener('click', async () => 
 document.getElementById('btn-login-remote').addEventListener('click', async () => {
     const host = document.getElementById('ssh-host').value.trim();
     const user = document.getElementById('ssh-user').value.trim();
+    const password = document.getElementById('ssh-pass').value; // Allowed to be empty if key is present
     const keyPath = fileDisplay.value.trim();
 
-    if (!host || !user || !keyPath) {
-        loginError.textContent = "Please fill all fields";
+    if (!host || !user) {
+        loginError.textContent = "Host and Username are required";
         return;
     }
 
-    loginError.textContent = "Connecting...";
+    if (!password && !keyPath) {
+        loginError.textContent = "Please provide either a Password or a Key File";
+        return;
+    }
+
+    loginError.textContent = "Connecting (Checking OS type...)...";
     try {
-        await window.api.loginRemote({ host, username: user, keyPath });
+        await window.api.loginRemote({ host, username: user, password, keyPath });
         showApp();
     } catch (err) {
         loginError.textContent = err.message;
@@ -176,51 +182,59 @@ async function loadConfigs(selectFileName = null) {
     const listEl = document.getElementById('config-list');
     listEl.innerHTML = 'Loading...';
     
-    const configs = await window.api.getConfigs();
-    listEl.innerHTML = '';
+    try {
+        const configs = await window.api.getConfigs();
+        listEl.innerHTML = '';
 
-    let itemToSelect = null;
+        let itemToSelect = null;
 
-    configs.forEach(conf => {
-        const li = document.createElement('li');
-        li.className = 'config-item';
-        
-        const nameSpan = document.createElement('span');
-        nameSpan.textContent = conf.name;
-        nameSpan.onclick = () => loadFile(conf.name, li);
+        configs.forEach(conf => {
+            const li = document.createElement('li');
+            li.className = 'config-item';
+            
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = conf.name;
+            nameSpan.onclick = () => loadFile(conf.name, li);
 
-        const label = document.createElement('label');
-        label.className = 'switch';
-        
-        const input = document.createElement('input');
-        input.type = 'checkbox';
-        input.checked = conf.enabled;
-        
-        input.addEventListener('change', async (e) => {
-            e.preventDefault(); 
-            const newState = input.checked;
-            try {
-                setStatus(`Toggling ${conf.name}...`);
-                await window.api.toggleSite(conf.name, !newState);
-                setStatus(`${conf.name} is now ${newState ? 'Enabled' : 'Disabled'}`);
-            } catch (err) {
-                input.checked = !newState; 
-                showCustomAlert('Error', 'Failed to toggle: ' + err);
-            }
+            const label = document.createElement('label');
+            label.className = 'switch';
+            
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.checked = conf.enabled;
+            
+            input.addEventListener('change', async (e) => {
+                e.preventDefault(); 
+                const newState = input.checked;
+                try {
+                    setStatus(`Toggling ${conf.name}...`);
+                    await window.api.toggleSite(conf.name, !newState);
+                    setStatus(`${conf.name} is now ${newState ? 'Enabled' : 'Disabled'}`);
+                } catch (err) {
+                    input.checked = !newState; 
+                    showCustomAlert('Error', 'Failed to toggle: ' + err);
+                }
+            });
+
+            const slider = document.createElement('span');
+            slider.className = 'slider';
+            label.appendChild(input);
+            label.appendChild(slider);
+            li.appendChild(nameSpan);
+            li.appendChild(label);
+            listEl.appendChild(li);
+
+            if (conf.name === selectFileName) itemToSelect = { name: conf.name, el: li };
         });
 
-        const slider = document.createElement('span');
-        slider.className = 'slider';
-        label.appendChild(input);
-        label.appendChild(slider);
-        li.appendChild(nameSpan);
-        li.appendChild(label);
-        listEl.appendChild(li);
+        if (itemToSelect) loadFile(itemToSelect.name, itemToSelect.el);
+        else if (configs.length > 0) setStatus(`${configs.length} configs loaded.`);
+        else setStatus('No configs found.');
 
-        if (conf.name === selectFileName) itemToSelect = { name: conf.name, el: li };
-    });
-
-    if (itemToSelect) loadFile(itemToSelect.name, itemToSelect.el);
+    } catch (err) {
+        listEl.innerHTML = "Error loading configs";
+        showCustomAlert('Error', err.message);
+    }
 }
 
 async function loadFile(fileName, liElement) {
@@ -333,8 +347,8 @@ btnCreateConfig.addEventListener('click', async () => {
     const name = newConfigInput.value.trim();
     if (!name) return;
 
-    if (!/^[a-zA-Z0-9_\-]+$/.test(name)) {
-        showCustomAlert('Invalid Name', "Only letters, numbers, underscores, and hyphens allowed.");
+    if (!/^[a-zA-Z0-9_\-\.]+$/.test(name)) {
+        showCustomAlert('Invalid Name', "Only letters, numbers, underscores, hyphens and dots allowed.");
         return;
     }
 
@@ -349,8 +363,8 @@ btnCreateConfig.addEventListener('click', async () => {
     server_name ${name};
     root /var/www/${name};
     index index.html index.htm;
-    access_log /var/www/logs/${name}/access.log;
-    error_log /var/www/logs/${name}/error.log;
+    access_log /var/log/nginx/${name}.access.log;
+    error_log /var/log/nginx/${name}.error.log;
     location / {
         try_files $uri $uri/ =404;
     }
@@ -373,6 +387,7 @@ btnCreateConfig.addEventListener('click', async () => {
 async function loadSnippets() {
     const list = document.getElementById('snippet-list');
     const snippets = await window.api.getSnippets();
+    list.innerHTML = '';
     
     snippets.forEach(snip => {
         const btn = document.createElement('button');

@@ -212,6 +212,8 @@ input:checked + .slider:before { transform: translateX(16px); }
     border: 1px solid #3e3e42;
     box-shadow: 0 10px 20px rgba(0,0,0,0.5);
     color: #d4d4d4;
+    max-height: 90vh;
+    overflow-y: auto;
 }
 
 .login-container h2 {
@@ -242,7 +244,8 @@ input:checked + .slider:before { transform: translateX(16px); }
 
 .input-group { margin-bottom: 10px; }
 .input-group label { display: block; font-size: 0.8rem; color: #aaa; margin-bottom: 4px; }
-.input-group input[type="text"] {
+.input-group input[type="text"], 
+.input-group input[type="password"] {
     width: 100%; padding: 8px; background: #3e3e42; border: 1px solid #555; color: white; box-sizing: border-box;
 }
 
