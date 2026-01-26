@@ -2,9 +2,13 @@ let editor;
 let snippetEditor;
 let currentFile = null;
 
-// Declare modal elements (will be validated before use)
+// Declare modal elements (validated before use)
 const snippetModal = document.getElementById('snippet-modal');
 const modalTitle = document.getElementById('modal-title');
+const customAlertModal = document.getElementById('custom-alert-modal');
+const sudoModal = document.getElementById('sudo-prompt-modal');
+const testModal = document.getElementById('test-output-modal');
+const newConfigModal = document.getElementById('new-config-modal');
 
 // Monaco Configuration
 require.config({ paths: { 'vs': './node_modules/monaco-editor/min/vs' }});
@@ -102,7 +106,6 @@ const statusEl = document.getElementById('status-bar');
 function setStatus(msg) { statusEl.textContent = msg; }
 
 // --- CUSTOM ALERT LOGIC ---
-const customAlertModal = document.getElementById('custom-alert-modal');
 const customAlertTitle = document.getElementById('custom-alert-title');
 const customAlertMessage = document.getElementById('custom-alert-message');
 const btnCloseCustomAlert = document.getElementById('btn-close-custom-alert');
@@ -187,7 +190,6 @@ if (btnLoginRemote) {
 }
 
 // --- SUDO PASSWORD PROMPT LOGIC ---
-const sudoModal = document.getElementById('sudo-prompt-modal');
 const sudoInput = document.getElementById('sudo-pass-input');
 const btnSubmitSudo = document.getElementById('btn-submit-sudo');
 const btnCancelSudo = document.getElementById('btn-cancel-sudo');
@@ -210,7 +212,7 @@ if (btnSubmitSudo) {
 // New Cancel Logic
 function cancelSudo() {
     window.api.cancelSudo();
-    sudoModal.classList.add('hidden');
+    if (sudoModal) sudoModal.classList.add('hidden');
 }
 
 if (btnCancelSudo) btnCancelSudo.addEventListener('click', cancelSudo);
@@ -338,7 +340,6 @@ if (btnSave) {
 }
 
 // 2. TEST
-const testModal = document.getElementById('test-output-modal');
 const testOutputText = document.getElementById('test-output-text');
 const btnCloseTest = document.getElementById('btn-close-test');
 const btnCloseTestAction = document.getElementById('btn-close-test-action');
@@ -387,7 +388,6 @@ if (btnReload) {
 
 // --- NEW CONFIG LOGIC ---
 
-const newConfigModal = document.getElementById('new-config-modal');
 const newConfigInput = document.getElementById('new-config-name');
 const btnCreateConfig = document.getElementById('btn-create-config');
 const btnCloseNewConfig = document.getElementById('btn-close-new-config');
@@ -503,11 +503,10 @@ function showSnippetModal(snippet) {
     }, 10);
 }
 
-// --- ROBUST SNIPPET MODAL EVENT LISTENERS ---
-// Using DOMContentLoaded to ensure elements exist
+// --- GLOBAL EVENT LISTENERS (HOTKEYS & BUTTONS) ---
 document.addEventListener('DOMContentLoaded', () => {
     
-    // 1. Close Button
+    // 1. Snippet Modal - Close & Copy
     const btnCloseModal = document.getElementById('btn-close-modal');
     if (btnCloseModal) {
         btnCloseModal.addEventListener('click', () => {
@@ -516,7 +515,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 2. Copy Button
     const btnCopySnippet = document.getElementById('btn-copy-snippet');
     if (btnCopySnippet) {
         btnCopySnippet.addEventListener('click', () => {
@@ -541,4 +539,71 @@ document.addEventListener('DOMContentLoaded', () => {
             if (editor) editor.focus();
         });
     }
+
+    // 2. Login Form Hotkeys (Enter to Login)
+    const loginInputs = ['ssh-host', 'ssh-user', 'ssh-pass'];
+    loginInputs.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    const btn = document.getElementById('btn-login-remote');
+                    if (btn) btn.click();
+                }
+            });
+        }
+    });
+
+    // 3. Global App Hotkeys (Ctrl+S, Ctrl+T, Ctrl+R, Esc)
+    document.addEventListener('keydown', (e) => {
+        // Only trigger if no modals are blocking (except for ESC which closes them)
+        // But Ctrl+S/T/R should mainly work when using the editor.
+        
+        // Handle ESC (Close all Modals)
+        if (e.key === 'Escape') {
+            // Prioritize cancelling sudo first if open
+            if (sudoModal && !sudoModal.classList.contains('hidden')) {
+                cancelSudo();
+                return;
+            }
+            if (customAlertModal && !customAlertModal.classList.contains('hidden')) {
+                closeCustomAlert();
+                return;
+            }
+            if (snippetModal && !snippetModal.classList.contains('hidden')) {
+                snippetModal.classList.add('hidden');
+                if (editor) editor.focus();
+                return;
+            }
+            if (testModal && !testModal.classList.contains('hidden')) {
+                closeTestModal();
+                return;
+            }
+            if (newConfigModal && !newConfigModal.classList.contains('hidden')) {
+                newConfigModal.classList.add('hidden');
+                if (editor) editor.focus();
+                return;
+            }
+            return;
+        }
+
+        // Handle App Shortcuts
+        if (e.ctrlKey) {
+            const key = e.key.toLowerCase();
+            switch (key) {
+                case 's': // Save
+                    e.preventDefault();
+                    if (btnSave && !btnSave.disabled) btnSave.click();
+                    break;
+                case 't': // Test
+                    e.preventDefault();
+                    if (btnTest && !btnTest.disabled) btnTest.click();
+                    break;
+                case 'r': // Reload
+                    e.preventDefault();
+                    if (btnReload && !btnReload.disabled) btnReload.click();
+                    break;
+            }
+        }
+    });
 });
