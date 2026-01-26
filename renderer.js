@@ -77,7 +77,17 @@ require(['vs/editor/editor.main'], async function() {
         theme: 'nginx-theme',
         automaticLayout: true,
         readOnly: true,
-        minimap: { enabled: false }
+        minimap: { enabled: false },       // No minimap
+        scrollBeyondLastLine: false,       // Prevent scrolling into empty space
+        lineNumbersMinChars: 3,            // Tighter line numbers
+        renderLineHighlight: 'none',       // No highlight current line
+        contextmenu: false,                // No right-click menu
+        overviewRulerLanes: 0,             // Remove scrollbar annotations
+        scrollbar: {
+            vertical: 'auto',              // Auto-hide scrollbar
+            horizontal: 'auto',
+            alwaysConsumeMouseWheel: false 
+        }
     });
 
     // --- LOAD CACHED LOGIN CREDENTIALS ---
@@ -478,7 +488,16 @@ function showSnippetModal(snippet) {
     if (modalTitle) modalTitle.textContent = snippet.name;
     snippetEditor.setValue(snippet.content);
     
+    // --- RESET TO STATIC LAYOUT ---
+    const container = document.getElementById('snippet-editor-container');
+    if (container) {
+        container.style.height = ''; // Reset inline height override
+        container.style.flex = '1';  // Restore flex expansion
+    }
+
     if (snippetModal) snippetModal.classList.remove('hidden');
+    
+    // Defer layout until visible
     setTimeout(() => {
         snippetEditor.layout();
     }, 10);
