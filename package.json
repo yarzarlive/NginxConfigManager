@@ -25,6 +25,7 @@
       "output": "dist"
     },
     "linux": {
+      "icon": "assets/icon.png",
       "target": [
         "deb"
       ],

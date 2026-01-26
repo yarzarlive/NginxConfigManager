@@ -43,13 +43,20 @@ class LocalAdapter {
 
     exec(command) {
         return new Promise((resolve, reject) => {
-            exec(command, (error, stdout, stderr) => {
+            // FIXED: We now handle password writing to stdin instead of echoing it in shell
+            const child = exec(command, (error, stdout, stderr) => {
                 if (error) {
                     reject(stderr || error.message);
                 } else {
                     resolve(stdout);
                 }
             });
+
+            // If this is a sudo command and we have a password, pipe it securely
+            if (command.startsWith('sudo -S') && typeof this.sudoPassword === 'string') {
+                child.stdin.write(this.sudoPassword + '\n');
+                child.stdin.end();
+            }
         });
     }
 
@@ -67,11 +74,9 @@ class LocalAdapter {
     getSudoCmd(cmd) {
         if (this.sudoPassword === false) return `sudo ${cmd}`;
         
-        if (typeof this.sudoPassword === 'string') {
-            const safePass = this.sudoPassword.replace(/"/g, '\\"');
-            return `echo "${safePass}" | sudo -S -p '' ${cmd}`;
-        }
-        return `sudo ${cmd}`;
+        // FIXED: Removed insecure `echo "pass" | sudo`. 
+        // We now use `sudo -S` which reads from stdin, and we write to it in exec().
+        return `sudo -S -p '' ${cmd}`;
     }
 
     async listConfigs() {
@@ -109,7 +114,6 @@ class LocalAdapter {
             try {
                 const existingContent = fs.readFileSync(sourcePath, 'utf-8');
                 const backupName = `local_${fileName}.${Date.now()}`;
-                // FIXED: Using writable BACKUP_DIR in userData
                 fs.writeFileSync(path.join(BACKUP_DIR, backupName), existingContent);
             } catch (err) { console.error("Backup failed", err); }
         }
@@ -139,9 +143,14 @@ class LocalAdapter {
         await this.ensureSudo();
         return new Promise((resolve) => {
             const cmd = this.getSudoCmd('nginx -t');
-            exec(cmd, (error, stdout, stderr) => {
-                if (error) resolve({ success: false, output: stderr || error.message });
-                else resolve({ success: true, output: stderr || stdout || "Syntax OK" });
+            
+            // Special handling for testConfig since it needs custom error parsing
+            // We duplicate the exec logic here to access the child process directly if needed,
+            // or just use the class exec. Using class exec for consistency.
+            this.exec(cmd).then(stdout => {
+                resolve({ success: true, output: stdout || "Syntax OK" });
+            }).catch(err => {
+                resolve({ success: false, output: err });
             });
         });
     }
@@ -182,6 +191,13 @@ class RemoteAdapter {
         return new Promise((resolve, reject) => {
             this.conn.exec(command, (err, stream) => {
                 if (err) return reject(err);
+                
+                // FIXED: Write password to stdin if command requests it (sudo -S)
+                if (command.startsWith('sudo -S') && typeof this.sudoPassword === 'string') {
+                    stream.write(this.sudoPassword + '\n');
+                }
+                stream.end();
+
                 let stdout = '';
                 let stderr = '';
                 stream.on('close', (code) => {
@@ -205,11 +221,10 @@ class RemoteAdapter {
 
     getSudoCmd(cmd) {
         if (this.sudoPassword === false) return `sudo ${cmd}`;
-        if (typeof this.sudoPassword === 'string') {
-            const safePass = this.sudoPassword.replace(/"/g, '\\"');
-            return `echo "${safePass}" | sudo -S -p '' ${cmd}`;
-        }
-        return `sudo ${cmd}`;
+        
+        // FIXED: Removed insecure `echo "pass" | sudo`. 
+        // We now use `sudo -S` which reads from stdin.
+        return `sudo -S -p '' ${cmd}`;
     }
 
     async listConfigs() {
@@ -242,7 +257,6 @@ class RemoteAdapter {
         try {
             const existingContent = await this.exec(`cat ${path.posix.join(this.sitesAvailable, fileName)}`);
             const backupName = `${this.config.host}_${fileName}.${Date.now()}`;
-            // FIXED: Using writable BACKUP_DIR in userData
             fs.writeFileSync(path.join(BACKUP_DIR, backupName), existingContent); 
         } catch (err) { console.log("Skipping backup", err); }
 
@@ -279,6 +293,13 @@ class RemoteAdapter {
             const cmd = this.getSudoCmd('nginx -t');
             this.conn.exec(cmd, (err, stream) => {
                 if (err) return resolve({ success: false, output: err.message });
+                
+                // FIXED: Must also handle password write here since we aren't using this.exec() wrapper
+                if (typeof this.sudoPassword === 'string') {
+                    stream.write(this.sudoPassword + '\n');
+                }
+                stream.end();
+
                 let output = '';
                 stream.on('close', (code) => {
                     resolve({ success: code === 0, output: output });
@@ -300,6 +321,8 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1200,
         height: 800,
+        // ADDED: App Icon for window title bar and taskbar (dev/runtime)
+        icon: path.join(__dirname, 'assets', 'icon.png'),
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             nodeIntegration: false,
@@ -401,9 +424,8 @@ ipcMain.handle('reload-nginx', async () => {
 });
 
 ipcMain.handle('get-snippets', async () => {
-    // FIXED: Moved from __dirname to writable userData SNIPPETS_DIR
-    if (!fs.existsSync(path.join(SNIPPETS_DIR, 'Logs Path'))) {
-        fs.writeFileSync(path.join(SNIPPETS_DIR, 'Logs Path'), 'access_log /var/log/nginx/access.log;\nerror_log /var/log/nginx/error.log;');
+    if (!fs.existsSync(path.join(SNIPPETS_DIR, 'LogsPath'))) {
+        fs.writeFileSync(path.join(SNIPPETS_DIR, 'LogsPath'), 'access_log /var/log/nginx/access.log;\nerror_log /var/log/nginx/error.log;');
     }
     const files = fs.readdirSync(SNIPPETS_DIR);
     return files.map(file => ({
@@ -412,10 +434,7 @@ ipcMain.handle('get-snippets', async () => {
     }));
 });
 
-// --- NEW: Get Keywords Handler ---
 ipcMain.handle('get-nginx-keywords', async () => {
-    // Note: Keywords are usually read-only assets, so keeping __dirname is okay
-    // provided the file exists in your app directory.
     const keywordsPath = path.join(__dirname, 'nginx-keywords.json');
     try {
         if (fs.existsSync(keywordsPath)) {
