@@ -52,6 +52,27 @@ To run this application, the following requirements must be met:
     * The user must have `sudo` privileges on the remote server.
     * Run `sudo visudo` command, add new line `ubuntu ALL=(ALL) NOPASSWD:ALL`. Replace `ubuntu` with your linux server username.
 
+## File paths
+
+### Code Snippet files were save in the following dir
+```
+# Linux
+~/.config/nginx-config-manager/snippets
+
+# Windows
+C:\Users\<User>\AppData\Roaming\nginx-config-manager\snippets\
+
+```
+
+### Backup nginx config files were saved in the following path
+```
+# Linux
+~/.config/nginx-config-manager/backups
+
+# Windows
+C:\Users\<User>\AppData\Roaming\nginx-config-manager\backups\
+```
+
 ## Installation
 
 Clone the repository and install the dependencies:
