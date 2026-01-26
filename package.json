@@ -1,7 +1,7 @@
 {
   "name": "nginx-config-manager",
   "version": "1.0.0",
-  "description": "Nginx Config Manager GUI",
+  "description": "NxC Nginx Config Manager GUI",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -19,8 +19,8 @@
     "electron-builder": "^26.4.0"
   },
   "build": {
-    "appId": "com.nginx.manager",
-    "productName": "Nginx Config Manager",
+    "appId": "net.yarzar.nxc",
+    "productName": "NxC Nginx Config Manager",
     "directories": {
       "output": "dist"
     },
