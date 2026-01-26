@@ -2,6 +2,10 @@ let editor;
 let snippetEditor;
 let currentFile = null;
 
+// Declare modal elements (will be validated before use)
+const snippetModal = document.getElementById('snippet-modal');
+const modalTitle = document.getElementById('modal-title');
+
 // Monaco Configuration
 require.config({ paths: { 'vs': './node_modules/monaco-editor/min/vs' }});
 
@@ -75,6 +79,13 @@ require(['vs/editor/editor.main'], async function() {
         readOnly: true,
         minimap: { enabled: false }
     });
+
+    // --- LOAD CACHED LOGIN CREDENTIALS ---
+    try {
+        const lastLogin = await window.api.getLastLogin();
+        if (lastLogin.host) document.getElementById('ssh-host').value = lastLogin.host;
+        if (lastLogin.username) document.getElementById('ssh-user').value = lastLogin.username;
+    } catch (e) { console.error("Error loading cached login", e); }
 });
 
 const statusEl = document.getElementById('status-bar');
@@ -88,19 +99,21 @@ const btnCloseCustomAlert = document.getElementById('btn-close-custom-alert');
 const btnCloseCustomAlertAction = document.getElementById('btn-close-custom-alert-action');
 
 function showCustomAlert(title, message) {
-    customAlertTitle.textContent = title;
-    customAlertMessage.textContent = message;
-    customAlertModal.classList.remove('hidden');
-    btnCloseCustomAlertAction.focus();
+    if (customAlertTitle) customAlertTitle.textContent = title;
+    if (customAlertMessage) customAlertMessage.textContent = message;
+    if (customAlertModal) {
+        customAlertModal.classList.remove('hidden');
+        if (btnCloseCustomAlertAction) btnCloseCustomAlertAction.focus();
+    }
 }
 
 function closeCustomAlert() {
-    customAlertModal.classList.add('hidden');
+    if (customAlertModal) customAlertModal.classList.add('hidden');
     if (editor) editor.focus();
 }
 
-btnCloseCustomAlert.addEventListener('click', closeCustomAlert);
-btnCloseCustomAlertAction.addEventListener('click', closeCustomAlert);
+if (btnCloseCustomAlert) btnCloseCustomAlert.addEventListener('click', closeCustomAlert);
+if (btnCloseCustomAlertAction) btnCloseCustomAlertAction.addEventListener('click', closeCustomAlert);
 
 // --- LOGIN LOGIC ---
 const loginScreen = document.getElementById('login-screen');
@@ -108,56 +121,67 @@ const appContainer = document.getElementById('app-container');
 const loginError = document.getElementById('login-error');
 
 function showApp() {
-    loginScreen.style.display = 'none';
-    appContainer.style.display = 'flex';
+    if (loginScreen) loginScreen.style.display = 'none';
+    if (appContainer) appContainer.style.display = 'flex';
     loadConfigs();
     loadSnippets();
 }
 
-document.getElementById('btn-login-local').addEventListener('click', async () => {
-    try {
-        await window.api.loginLocal();
-        showApp();
-    } catch (err) {
-        loginError.textContent = "Local Login Failed: " + err;
-    }
-});
+const btnLoginLocal = document.getElementById('btn-login-local');
+if (btnLoginLocal) {
+    btnLoginLocal.addEventListener('click', async () => {
+        try {
+            await window.api.loginLocal();
+            showApp();
+        } catch (err) {
+            loginError.textContent = "Local Login Failed: " + err;
+        }
+    });
+}
 
 const fileDisplay = document.getElementById('ssh-key-display');
-document.getElementById('btn-browse-key').addEventListener('click', async () => {
-    const path = await window.api.selectKeyFile();
-    if (path) fileDisplay.value = path;
-});
+const btnBrowseKey = document.getElementById('btn-browse-key');
+if (btnBrowseKey) {
+    btnBrowseKey.addEventListener('click', async () => {
+        const path = await window.api.selectKeyFile();
+        if (path) fileDisplay.value = path;
+    });
+}
 
-document.getElementById('btn-login-remote').addEventListener('click', async () => {
-    const host = document.getElementById('ssh-host').value.trim();
-    const user = document.getElementById('ssh-user').value.trim();
-    const password = document.getElementById('ssh-pass').value; // Allowed to be empty if key is present
-    const keyPath = fileDisplay.value.trim();
+const btnLoginRemote = document.getElementById('btn-login-remote');
+if (btnLoginRemote) {
+    btnLoginRemote.addEventListener('click', async () => {
+        const host = document.getElementById('ssh-host').value.trim();
+        const user = document.getElementById('ssh-user').value.trim();
+        const password = document.getElementById('ssh-pass').value; // Allowed to be empty if key is present
+        const keyPath = fileDisplay.value.trim();
 
-    if (!host || !user) {
-        loginError.textContent = "Host and Username are required";
-        return;
-    }
+        if (!host || !user) {
+            loginError.textContent = "Host and Username are required";
+            return;
+        }
 
-    if (!password && !keyPath) {
-        loginError.textContent = "Please provide either a Password or a Key File";
-        return;
-    }
+        if (!password && !keyPath) {
+            loginError.textContent = "Please provide either a Password or a Key File";
+            return;
+        }
 
-    loginError.textContent = "Connecting (Checking OS type...)...";
-    try {
-        await window.api.loginRemote({ host, username: user, password, keyPath });
-        showApp();
-    } catch (err) {
-        loginError.textContent = err.message;
-    }
-});
+        loginError.textContent = "Connecting (Checking OS type...)...";
+        try {
+            await window.api.loginRemote({ host, username: user, password, keyPath });
+            showApp();
+        } catch (err) {
+            loginError.textContent = err.message;
+        }
+    });
+}
 
 // --- SUDO PASSWORD PROMPT LOGIC ---
 const sudoModal = document.getElementById('sudo-prompt-modal');
 const sudoInput = document.getElementById('sudo-pass-input');
 const btnSubmitSudo = document.getElementById('btn-submit-sudo');
+const btnCancelSudo = document.getElementById('btn-cancel-sudo');
+const btnCloseSudo = document.getElementById('btn-close-sudo-modal');
 
 window.api.onPromptSudo(() => {
     sudoInput.value = '';
@@ -165,15 +189,28 @@ window.api.onPromptSudo(() => {
     sudoInput.focus();
 });
 
-btnSubmitSudo.addEventListener('click', () => {
-    const pass = sudoInput.value;
-    window.api.sendSudoPassword(pass);
-    sudoModal.classList.add('hidden');
-});
+if (btnSubmitSudo) {
+    btnSubmitSudo.addEventListener('click', () => {
+        const pass = sudoInput.value;
+        window.api.sendSudoPassword(pass);
+        sudoModal.classList.add('hidden');
+    });
+}
 
-sudoInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') btnSubmitSudo.click();
-});
+// New Cancel Logic
+function cancelSudo() {
+    window.api.cancelSudo();
+    sudoModal.classList.add('hidden');
+}
+
+if (btnCancelSudo) btnCancelSudo.addEventListener('click', cancelSudo);
+if (btnCloseSudo) btnCloseSudo.addEventListener('click', cancelSudo);
+
+if (sudoInput) {
+    sudoInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') btnSubmitSudo.click();
+    });
+}
 
 
 // --- CONFIG LIST LOGIC ---
@@ -203,18 +240,26 @@ async function loadConfigs(selectFileName = null) {
             input.type = 'checkbox';
             input.checked = conf.enabled;
             
-            input.addEventListener('change', async (e) => {
-                e.preventDefault(); 
-                const newState = input.checked;
-                try {
-                    setStatus(`Toggling ${conf.name}...`);
-                    await window.api.toggleSite(conf.name, !newState);
-                    setStatus(`${conf.name} is now ${newState ? 'Enabled' : 'Disabled'}`);
-                } catch (err) {
-                    input.checked = !newState; 
-                    showCustomAlert('Error', 'Failed to toggle: ' + err);
-                }
-            });
+            // Handle Locked Configs (conf.d)
+            if (conf.locked) {
+                input.disabled = true;
+                label.title = "Always Enabled (Managed via conf.d)";
+                label.style.opacity = '0.6';
+                label.style.cursor = 'not-allowed';
+            } else {
+                input.addEventListener('change', async (e) => {
+                    e.preventDefault(); 
+                    const newState = input.checked;
+                    try {
+                        setStatus(`Toggling ${conf.name}...`);
+                        await window.api.toggleSite(conf.name, !newState);
+                        setStatus(`${conf.name} is now ${newState ? 'Enabled' : 'Disabled'}`);
+                    } catch (err) {
+                        input.checked = !newState; 
+                        showCustomAlert('Error', 'Failed to toggle: ' + err.message);
+                    }
+                });
+            }
 
             const slider = document.createElement('span');
             slider.className = 'slider';
@@ -256,28 +301,31 @@ async function loadFile(fileName, liElement) {
         editor.focus();
     } catch (err) {
         editor.setValue("# Error loading file");
-        showCustomAlert('Error', "Error reading config: " + err);
+        showCustomAlert('Error', "Error reading config: " + err.message);
     }
 }
 
 // --- TOOLBAR ACTIONS ---
 
 // 1. SAVE
-document.getElementById('btn-save').addEventListener('click', async () => {
-    if (!currentFile) return;
-    const content = editor.getValue();
-    setStatus('Saving & Backing up...');
+const btnSave = document.getElementById('btn-save');
+if (btnSave) {
+    btnSave.addEventListener('click', async () => {
+        if (!currentFile) return;
+        const content = editor.getValue();
+        setStatus('Saving & Backing up...');
 
-    try {
-        await window.api.saveConfig(currentFile, content);
-        document.getElementById('editor-container').style.borderTopColor = '#000';
-        setStatus('Saved successfully');
-        editor.focus();
-    } catch (err) {
-        showCustomAlert('Error', "Failed to save: " + err);
-        setStatus('Error saving');
-    }
-});
+        try {
+            await window.api.saveConfig(currentFile, content);
+            document.getElementById('editor-container').style.borderTopColor = '#000';
+            setStatus('Saved successfully');
+            editor.focus();
+        } catch (err) {
+            showCustomAlert('Error', "Failed to save: " + err.message);
+            setStatus('Error saving');
+        }
+    });
+}
 
 // 2. TEST
 const testModal = document.getElementById('test-output-modal');
@@ -286,39 +334,45 @@ const btnCloseTest = document.getElementById('btn-close-test');
 const btnCloseTestAction = document.getElementById('btn-close-test-action');
 
 function closeTestModal() { 
-    testModal.classList.add('hidden'); 
-    editor.focus(); 
+    if (testModal) testModal.classList.add('hidden'); 
+    if (editor) editor.focus(); 
 }
-btnCloseTest.addEventListener('click', closeTestModal);
-btnCloseTestAction.addEventListener('click', closeTestModal);
+if (btnCloseTest) btnCloseTest.addEventListener('click', closeTestModal);
+if (btnCloseTestAction) btnCloseTestAction.addEventListener('click', closeTestModal);
 
-document.getElementById('btn-test').addEventListener('click', async () => {
-    setStatus('Running nginx -t...');
-    testOutputText.textContent = "Running...";
-    testModal.classList.remove('hidden');
+const btnTest = document.getElementById('btn-test');
+if (btnTest) {
+    btnTest.addEventListener('click', async () => {
+        setStatus('Running nginx -t...');
+        testOutputText.textContent = "Running...";
+        testModal.classList.remove('hidden');
 
-    try {
-        const result = await window.api.testConfig();
-        testOutputText.textContent = result.output;
-        setStatus(result.success ? 'Test Syntax OK' : 'Test Failed');
-    } catch (err) {
-        testOutputText.textContent = "Error invoking test command: " + err;
-        setStatus('Test execution failed');
-    }
-});
+        try {
+            const result = await window.api.testConfig();
+            testOutputText.textContent = result.output;
+            setStatus(result.success ? 'Test Syntax OK' : 'Test Failed');
+        } catch (err) {
+            testOutputText.textContent = "Error invoking test command: " + err.message;
+            setStatus('Test execution failed');
+        }
+    });
+}
 
 // 3. RELOAD
-document.getElementById('btn-reload').addEventListener('click', async () => {
-    setStatus('Reloading Nginx...');
-    try {
-        await window.api.reloadNginx();
-        setStatus('Nginx Reloaded Successfully');
-        showCustomAlert('Success', "Nginx reloaded successfully.");
-    } catch (err) {
-        showCustomAlert('Error', "Reload failed: " + err);
-        setStatus('Reload failed');
-    }
-});
+const btnReload = document.getElementById('btn-reload');
+if (btnReload) {
+    btnReload.addEventListener('click', async () => {
+        setStatus('Reloading Nginx...');
+        try {
+            await window.api.reloadNginx();
+            setStatus('Nginx Reloaded Successfully');
+            showCustomAlert('Success', "Nginx reloaded successfully.");
+        } catch (err) {
+            showCustomAlert('Error', "Reload failed: " + err.message);
+            setStatus('Reload failed');
+        }
+    });
+}
 
 
 // --- NEW CONFIG LOGIC ---
@@ -328,37 +382,45 @@ const newConfigInput = document.getElementById('new-config-name');
 const btnCreateConfig = document.getElementById('btn-create-config');
 const btnCloseNewConfig = document.getElementById('btn-close-new-config');
 
-document.getElementById('btn-new-config').addEventListener('click', () => {
-    newConfigInput.value = '';
-    newConfigModal.classList.remove('hidden');
-    newConfigInput.focus();
-});
+const btnNewConfig = document.getElementById('btn-new-config');
+if (btnNewConfig) {
+    btnNewConfig.addEventListener('click', () => {
+        newConfigInput.value = '';
+        newConfigModal.classList.remove('hidden');
+        newConfigInput.focus();
+    });
+}
 
-btnCloseNewConfig.addEventListener('click', () => { 
-    newConfigModal.classList.add('hidden'); 
-    if(editor) editor.focus();
-});
+if (btnCloseNewConfig) {
+    btnCloseNewConfig.addEventListener('click', () => { 
+        newConfigModal.classList.add('hidden'); 
+        if(editor) editor.focus();
+    });
+}
 
-newConfigInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') btnCreateConfig.click();
-});
+if (newConfigInput) {
+    newConfigInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') btnCreateConfig.click();
+    });
+}
 
-btnCreateConfig.addEventListener('click', async () => {
-    const name = newConfigInput.value.trim();
-    if (!name) return;
+if (btnCreateConfig) {
+    btnCreateConfig.addEventListener('click', async () => {
+        const name = newConfigInput.value.trim();
+        if (!name) return;
 
-    if (!/^[a-zA-Z0-9_\-\.]+$/.test(name)) {
-        showCustomAlert('Invalid Name', "Only letters, numbers, underscores, hyphens and dots allowed.");
-        return;
-    }
+        if (!/^[a-zA-Z0-9_\-\.]+$/.test(name)) {
+            showCustomAlert('Invalid Name', "Only letters, numbers, underscores, hyphens and dots allowed.");
+            return;
+        }
 
-    const existingConfigs = await window.api.getConfigs();
-    if (existingConfigs.find(c => c.name === name)) {
-        showCustomAlert('Error', "Config already exists.");
-        return;
-    }
+        const existingConfigs = await window.api.getConfigs();
+        if (existingConfigs.find(c => c.name === name)) {
+            showCustomAlert('Error', "Config already exists.");
+            return;
+        }
 
-    const template = `server {
+        const template = `server {
     listen 80;
     server_name ${name};
     root /var/www/${name};
@@ -370,62 +432,94 @@ btnCreateConfig.addEventListener('click', async () => {
     }
 }`;
 
-    setStatus('Creating new config...');
-    try {
-        await window.api.createConfig(name, template);
-        setStatus('Config created');
-        newConfigModal.classList.add('hidden');
-        await loadConfigs(name);
-        editor.focus();
-    } catch (err) {
-        showCustomAlert('Error', "Error creating config: " + err);
-    }
-});
+        setStatus('Creating new config...');
+        try {
+            await window.api.createConfig(name, template);
+            setStatus('Config created');
+            newConfigModal.classList.add('hidden');
+            await loadConfigs(name);
+            editor.focus();
+        } catch (err) {
+            showCustomAlert('Error', "Error creating config: " + err.message);
+        }
+    });
+}
 
 // --- SNIPPETS LOGIC ---
 
 async function loadSnippets() {
     const list = document.getElementById('snippet-list');
-    const snippets = await window.api.getSnippets();
-    list.innerHTML = '';
-    
-    snippets.forEach(snip => {
-        const btn = document.createElement('button');
-        btn.className = 'snippet-btn';
-        btn.textContent = snip.name;
-        btn.onclick = () => showSnippetModal(snip);
-        list.appendChild(btn);
-    });
+    if (!list) return;
+
+    // Safety: Handle error if reading snippets fails
+    try {
+        const snippets = await window.api.getSnippets();
+        list.innerHTML = '';
+        
+        snippets.forEach(snip => {
+            const btn = document.createElement('button');
+            btn.className = 'snippet-btn';
+            btn.textContent = snip.name;
+            btn.onclick = () => showSnippetModal(snip);
+            list.appendChild(btn);
+        });
+    } catch (err) {
+        console.error("Failed to load snippets", err);
+        list.innerHTML = '<p style="padding:10px; color:#aaa; font-size:0.8rem">Failed to load snippets</p>';
+    }
 }
 
-const snippetModal = document.getElementById('snippet-modal');
-const modalTitle = document.getElementById('modal-title');
-
 function showSnippetModal(snippet) {
-    modalTitle.textContent = snippet.name;
+    if (!snippetEditor) {
+        showCustomAlert("Error", "Editor not ready. Please try again in a moment.");
+        return;
+    }
+
+    if (modalTitle) modalTitle.textContent = snippet.name;
     snippetEditor.setValue(snippet.content);
     
-    snippetModal.classList.remove('hidden');
+    if (snippetModal) snippetModal.classList.remove('hidden');
     setTimeout(() => {
         snippetEditor.layout();
     }, 10);
 }
 
-document.getElementById('btn-close-modal').onclick = () => {
-    snippetModal.classList.add('hidden');
-    editor.focus();
-};
+// --- ROBUST SNIPPET MODAL EVENT LISTENERS ---
+// Using DOMContentLoaded to ensure elements exist
+document.addEventListener('DOMContentLoaded', () => {
+    
+    // 1. Close Button
+    const btnCloseModal = document.getElementById('btn-close-modal');
+    if (btnCloseModal) {
+        btnCloseModal.addEventListener('click', () => {
+            if (snippetModal) snippetModal.classList.add('hidden');
+            if (editor) editor.focus();
+        });
+    }
 
-document.getElementById('btn-copy-snippet').onclick = () => {
-    const val = snippetEditor.getValue();
-    const el = document.createElement('textarea');
-    el.value = val;
-    document.body.appendChild(el);
-    el.select();
-    document.execCommand('copy');
-    document.body.removeChild(el);
+    // 2. Copy Button
+    const btnCopySnippet = document.getElementById('btn-copy-snippet');
+    if (btnCopySnippet) {
+        btnCopySnippet.addEventListener('click', () => {
+            if (!snippetEditor) return;
 
-    setStatus('Snippet copied');
-    snippetModal.classList.add('hidden');
-    editor.focus();
-};
+            const val = snippetEditor.getValue();
+            const el = document.createElement('textarea');
+            el.value = val;
+            document.body.appendChild(el);
+            el.select();
+            
+            try {
+                document.execCommand('copy');
+                setStatus('Snippet copied');
+            } catch (err) {
+                setStatus('Copy failed');
+            }
+            
+            document.body.removeChild(el);
+
+            if (snippetModal) snippetModal.classList.add('hidden');
+            if (editor) editor.focus();
+        });
+    }
+});

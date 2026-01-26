@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('api', {
     loginLocal: () => ipcRenderer.invoke('login-local'),
     loginRemote: (details) => ipcRenderer.invoke('login-remote', details),
     selectKeyFile: () => ipcRenderer.invoke('select-key-file'),
+    getLastLogin: () => ipcRenderer.invoke('get-last-login'), // NEW
     
     getConfigs: () => ipcRenderer.invoke('get-configs'),
     readConfig: (fileName) => ipcRenderer.invoke('read-config', fileName),
@@ -18,7 +19,7 @@ contextBridge.exposeInMainWorld('api', {
 
     onPromptSudo: (callback) => ipcRenderer.on('prompt-sudo', callback),
     sendSudoPassword: (password) => ipcRenderer.send('sudo-response', password),
+    cancelSudo: () => ipcRenderer.send('sudo-cancel'),
 
-    // NEW: Get Keywords
     getNginxKeywords: () => ipcRenderer.invoke('get-nginx-keywords')
 });
