@@ -4,14 +4,38 @@
   "description": "Nginx Config Manager GUI",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder"
   },
   "author": "Yar Zar",
   "license": "MIT",
   "dependencies": {
-    "electron": "^40.0.0",
     "monaco-editor": "^0.45.0",
     "ssh2": "^1.17.0",
     "sudo-prompt": "^9.2.1"
+  },
+  "devDependencies": {
+    "electron": "^40.0.0",
+    "electron-builder": "^26.4.0"
+  },
+  "build": {
+    "appId": "com.nginx.manager",
+    "productName": "Nginx Config Manager",
+    "directories": {
+      "output": "dist"
+    },
+    "linux": {
+      "target": [
+        "deb"
+      ],
+      "category": "Utility",
+      "maintainer": "Yar Zar",
+      "synopsis": "GUI for managing Nginx configurations"
+    },
+    "files": [
+      "**/*",
+      "!dist/*",
+      "!backups/*"
+    ]
   }
 }

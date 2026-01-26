@@ -9,10 +9,21 @@ const { exec } = require('child_process');
 if (!util.isObject) util.isObject = (arg) => typeof arg === 'object' && arg !== null;
 if (!util.isFunction) util.isFunction = (arg) => typeof arg === 'function';
 
-// Backup Directory
-const BACKUP_DIR = path.join(__dirname, 'backups');
+/**
+ * FIXED: Persistent Path Management
+ * In packaged Electron apps, __dirname is read-only (inside app.asar).
+ * We use app.getPath('userData') for any directory we need to write to.
+ */
+const userDataPath = app.getPath('userData');
+const BACKUP_DIR = path.join(userDataPath, 'backups');
+const SNIPPETS_DIR = path.join(userDataPath, 'snippets');
+
+// Ensure directories exist at startup
 if (!fs.existsSync(BACKUP_DIR)) {
-    fs.mkdirSync(BACKUP_DIR);
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+}
+if (!fs.existsSync(SNIPPETS_DIR)) {
+    fs.mkdirSync(SNIPPETS_DIR, { recursive: true });
 }
 
 // Global State
@@ -98,12 +109,13 @@ class LocalAdapter {
             try {
                 const existingContent = fs.readFileSync(sourcePath, 'utf-8');
                 const backupName = `local_${fileName}.${Date.now()}`;
+                // FIXED: Using writable BACKUP_DIR in userData
                 fs.writeFileSync(path.join(BACKUP_DIR, backupName), existingContent);
             } catch (err) { console.error("Backup failed", err); }
         }
 
         const filePath = path.join(this.sitesAvailable, fileName);
-        const tempPath = `/tmp/nginx_mgr_local_${Date.now()}_${fileName}`;
+        const tempPath = path.join(userDataPath, `nginx_mgr_local_${Date.now()}_${fileName}`);
         
         try {
             fs.writeFileSync(tempPath, content);
@@ -230,6 +242,7 @@ class RemoteAdapter {
         try {
             const existingContent = await this.exec(`cat ${path.posix.join(this.sitesAvailable, fileName)}`);
             const backupName = `${this.config.host}_${fileName}.${Date.now()}`;
+            // FIXED: Using writable BACKUP_DIR in userData
             fs.writeFileSync(path.join(BACKUP_DIR, backupName), existingContent); 
         } catch (err) { console.log("Skipping backup", err); }
 
@@ -388,9 +401,8 @@ ipcMain.handle('reload-nginx', async () => {
 });
 
 ipcMain.handle('get-snippets', async () => {
-    const SNIPPETS_DIR = path.join(__dirname, 'snippets');
-    if (!fs.existsSync(SNIPPETS_DIR)) {
-        fs.mkdirSync(SNIPPETS_DIR);
+    // FIXED: Moved from __dirname to writable userData SNIPPETS_DIR
+    if (!fs.existsSync(path.join(SNIPPETS_DIR, 'Logs Path'))) {
         fs.writeFileSync(path.join(SNIPPETS_DIR, 'Logs Path'), 'access_log /var/log/nginx/access.log;\nerror_log /var/log/nginx/error.log;');
     }
     const files = fs.readdirSync(SNIPPETS_DIR);
@@ -402,6 +414,8 @@ ipcMain.handle('get-snippets', async () => {
 
 // --- NEW: Get Keywords Handler ---
 ipcMain.handle('get-nginx-keywords', async () => {
+    // Note: Keywords are usually read-only assets, so keeping __dirname is okay
+    // provided the file exists in your app directory.
     const keywordsPath = path.join(__dirname, 'nginx-keywords.json');
     try {
         if (fs.existsSync(keywordsPath)) {
